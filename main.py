@@ -2,7 +2,8 @@ import sys
 import platform
 import asyncio
 import logging
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
+from time import time
 
 import aiohttp
 
@@ -42,10 +43,8 @@ async def request(url):
         return None
 
 
-async def day_response(url=URL, rule='base'):
-    url = f'{url}01.12.2014'
+def response_parse(response: dict, rule='base') -> str:
     list_currency = []
-    response = await request(url)
     if response:
         list_currency.append(f'Date: {response.get("date")} (NB in UAH)')
         exchange_rates = response.get("exchangeRate")
@@ -61,6 +60,18 @@ async def day_response(url=URL, rule='base'):
     return '\n'.join(list_currency)
 
 
+async def iterator_req(link_urls):
+    for url in link_urls:
+        yield request(url)
+
+
+async def run(iter_req):
+    result = []
+    async for req in iter_req:
+        result.append(req)
+    return await asyncio.gather(*result)
+
+
 def link_list(days: int) -> list:
     res_list = []
     for i in range(int(days)):
@@ -70,23 +81,74 @@ def link_list(days: int) -> list:
     return res_list
 
 
-def manual():
+def manual() -> None:
     print(MANUAL)
     print('Available currency:')
     print([i for i in RULE][:-2])
     print("Additional currency command :['all', 'base']")
 
 
-def input_parser():
+def correcting_day(days: int) -> int:
+    if days < 0:
+        print(f'Days not be negative: {days}')
+        days = 1
+    elif days == 0 or days == 1:
+        days = 1
+    elif days > 10:
+        days = 10
+    return days
+
+
+def input_parser() -> (int, str):
     list_parse = sys.argv[1:]
+    days = 1
+    rule = 'base'
+    if len(list_parse) > 2:
+        print(f'Too many arguments: {list_parse}')
+    elif len(list_parse) == 2:
+        if list_parse[0].strip().isdigit():
+            days = int(list_parse[0].strip())
+            days = correcting_day(days)
+            if list_parse[1].strip().lower() in RULE:
+                rule = list_parse[1].strip().lower()
+            else:
+                print(f'Currency for {days} days, but not found rule: {list_parse[1].strip().lower()}')
+        elif list_parse[0].strip().lower() in RULE:
+            rule = list_parse[0].strip().lower()
+            if list_parse[1].strip().isdigit():
+                days = int(list_parse[1].strip())
+                days = correcting_day(days)
+            else:
+                print(f'Currency rule: {rule}, but days not found: {list_parse[1].strip().lower()}')
+        else:
+            print(f'These arguments not found: {list_parse[0].strip().lower()}, {list_parse[1].strip().lower()}')
+    elif len(list_parse) == 1:
+        if list_parse[0].strip().isdigit():
+            days = int(list_parse[0].strip())
+            days = correcting_day(days)
+        elif list_parse[0].strip().lower() in RULE:
+            rule = list_parse[0].strip().lower()
+        elif list_parse[0].strip().lower() == 'help':
+            manual()
+        else:
+            print(f'Not found rule: {list_parse[0].strip().lower()}')
+    elif len(list_parse) == 0:
+        print('Run app with argument "help": "main.py help" for more info.')
+    return days, rule
+
+
+def main():
+    days, rule = input_parser()
+    urls = link_list(days)
+    if platform.system() == 'Windows':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    r = asyncio.run(run(iterator_req(urls)))
+    for day_res in r:
+        print(response_parse(day_res, rule))
 
 
 if __name__ == '__main__':
-    # manual()
-    start = datetime.now()
-    if platform.system() == 'Windows':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    r = asyncio.run(day_response())
-    print(r)
-    t = datetime.now() - start
-    print(t.microseconds/1000000 )
+    start = time()
+    main()
+    t = time() - start
+    print(f'Completed in {t} sec. Thanks for using.')
